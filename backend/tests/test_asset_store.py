@@ -75,6 +75,32 @@ def test_sqlite_store_persists_across_reopen(tmp_path):
     assert latest is not None and latest.id == cutout.id
 
 
+def test_select_variation_persists_and_returns(store):
+    """选中某变体后 get_selected_variation 返回它（两 adapter 一致）。"""
+    project = store.create_project()
+    cutout = store.add_asset(project.id, AssetKind.CUTOUT)
+    store.add_asset(project.id, AssetKind.VARIATION, parent_id=cutout.id)
+    v2 = store.add_asset(project.id, AssetKind.VARIATION, parent_id=cutout.id)
+
+    assert store.get_selected_variation(project.id) is None
+    store.select_variation(project.id, v2.id)
+    sel = store.get_selected_variation(project.id)
+    assert sel is not None and sel.id == v2.id
+
+
+def test_select_variation_persists_across_reopen(tmp_path):
+    """SQLite：选中变体重开 db 后仍在。"""
+    db = str(tmp_path / "sel.db")
+    s = SqliteAssetStore(db)
+    p = s.create_project()
+    c = s.add_asset(p.id, AssetKind.CUTOUT)
+    v = s.add_asset(p.id, AssetKind.VARIATION, parent_id=c.id)
+    s.select_variation(p.id, v.id)
+
+    sel = SqliteAssetStore(db).get_selected_variation(p.id)
+    assert sel is not None and sel.id == v.id
+
+
 def test_both_adapters_satisfy_same_lineage_contract(store):
     """内存与 SQLite adapter 对同一谱系行为给出相同结果。"""
     project = store.create_project()
