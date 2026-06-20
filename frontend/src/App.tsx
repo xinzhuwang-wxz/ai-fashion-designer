@@ -101,6 +101,8 @@ export default function App() {
     applyMaterial,
     sketchToGarment,
     applyEdit,
+    downloadRender,
+    exportParams,
   } = useProject()
 
   const [fabric, setFabric] = useState('silk')
@@ -204,7 +206,19 @@ export default function App() {
         <section className="wb-pane">
           <div className="wb-pane-label">
             成衣渲染（只读）
-            <span className="wb-state">{latest ? latest.kind : '—'}</span>
+            <span className="wb-label-actions">
+              {latest && (
+                <>
+                  <button className="wb-link" onClick={downloadRender}>
+                    下载
+                  </button>
+                  <button className="wb-link" onClick={exportParams}>
+                    导出参数
+                  </button>
+                </>
+              )}
+              <span className="wb-state">{latest ? latest.kind : '—'}</span>
+            </span>
           </div>
           <div
             className="wb-render"

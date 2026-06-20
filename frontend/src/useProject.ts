@@ -19,22 +19,40 @@ export function useProject() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
+  const absUrl = (u: string) => (u.startsWith('http') ? u : `${API_BASE}${u}`)
+
+  // 挂载：URL 带 ?project=ID 则【恢复】该项目，否则新建并把 id 写进 URL（可分享/重开恢复）
   useEffect(() => {
     let cancelled = false
-    fetch(`${API_BASE}/api/projects`, { method: 'POST' })
-      .then((r) => r.json())
-      .then((d) => {
-        if (!cancelled) setProjectId(d.project_id)
-      })
-      .catch(() => {
-        if (!cancelled) setError('后端连接失败')
-      })
+    const existing = new URLSearchParams(window.location.search).get('project')
+    if (existing) {
+      setProjectId(existing)
+      fetch(`${API_BASE}/api/projects/${existing}/export`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!d || cancelled) return
+          const a = d.assets || {}
+          if (a.lineart?.url) setLeftImage(absUrl(a.lineart.url))
+          const right = a.edit || a.material || a.variation || a.cutout
+          if (right?.url) setLatest({ id: right.id, url: absUrl(right.url), kind: 'restored' })
+        })
+        .catch(() => {})
+    } else {
+      fetch(`${API_BASE}/api/projects`, { method: 'POST' })
+        .then((r) => r.json())
+        .then((d) => {
+          if (cancelled) return
+          setProjectId(d.project_id)
+          window.history.replaceState(null, '', `?project=${d.project_id}`)
+        })
+        .catch(() => {
+          if (!cancelled) setError('后端连接失败')
+        })
+    }
     return () => {
       cancelled = true
     }
   }, [])
-
-  const absUrl = (u: string) => (u.startsWith('http') ? u : `${API_BASE}${u}`)
 
   // 按需确保有项目：初始建项目若失败/未完成，上传时再建一次，避免按钮卡死
   const ensureProject = useCallback(async (): Promise<string> => {
@@ -242,6 +260,41 @@ export function useProject() {
     [ensureProject],
   )
 
+  // 下载当前右画布成衣图
+  const downloadRender = useCallback(() => {
+    if (!latest) return
+    fetch(latest.url)
+      .then((r) => r.blob())
+      .then((blob) => {
+        const u = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = u
+        a.download = `aifd-${latest.kind}.png`
+        a.click()
+        URL.revokeObjectURL(u)
+      })
+      .catch(() => setError('下载失败'))
+  }, [latest])
+
+  // 导出设计参数(面料/颜色/seed/谱系)为 JSON
+  const exportParams = useCallback(async () => {
+    if (!projectId) return
+    try {
+      const r = await fetch(`${API_BASE}/api/projects/${projectId}/export`)
+      if (!r.ok) throw new Error()
+      const d = await r.json()
+      const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' })
+      const u = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = u
+      a.download = `aifd-design-${projectId}.json`
+      a.click()
+      URL.revokeObjectURL(u)
+    } catch {
+      setError('导出失败')
+    }
+  }, [projectId])
+
   return {
     projectId,
     latest,
@@ -257,6 +310,8 @@ export function useProject() {
     applyMaterial,
     sketchToGarment,
     applyEdit,
+    downloadRender,
+    exportParams,
     setLatest,
     apiBase: API_BASE,
   }
