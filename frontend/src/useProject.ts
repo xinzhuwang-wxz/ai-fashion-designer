@@ -34,6 +34,8 @@ export function useProject() {
     }
   }, [])
 
+  const absUrl = (u: string) => (u.startsWith('http') ? u : `${API_BASE}${u}`)
+
   // 按需确保有项目：初始建项目若失败/未完成，上传时再建一次，避免按钮卡死
   const ensureProject = useCallback(async (): Promise<string> => {
     if (projectId) return projectId
@@ -44,28 +46,42 @@ export function useProject() {
     return d.project_id
   }, [projectId])
 
+  // 自动流水线：上传 → 抠图(内部) → 线稿(左) → 成衣渲染(右)。复刻"上传完自动出线稿+成衣"。
   const upload = useCallback(
     async (file: File) => {
       setBusy(true)
       setError('')
+      setVariations([])
+      setSelectedVariationId(null)
+      setLeftImage(null)
+      setLatest(null)
       try {
         const pid = await ensureProject()
+        // 1) 上传 → Cutout（内部源，不展示在右画布）
         const fd = new FormData()
         fd.append('file', file)
-        const r = await fetch(`${API_BASE}/api/projects/${pid}/upload`, {
+        const up = await fetch(`${API_BASE}/api/projects/${pid}/upload`, { method: 'POST', body: fd })
+        if (!up.ok) throw new Error(`上传 HTTP ${up.status}`)
+        await up.json()
+        // 2) 自动提取线稿 → 左画布
+        const la = await fetch(`${API_BASE}/api/projects/${pid}/lineart`, { method: 'POST' })
+        if (!la.ok) throw new Error(`线稿 HTTP ${la.status}`)
+        const lad = await la.json()
+        setLeftImage(absUrl(lad.lineart.url))
+        // 3) 自动渲染成衣（默认面料）→ 右画布
+        const mat = await fetch(`${API_BASE}/api/projects/${pid}/material`, {
           method: 'POST',
-          body: fd,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fabric: 'silk' }),
         })
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        const d = await r.json()
-        const raw = d.cutout.url as string
-        const url = raw.startsWith('http') ? raw : `${API_BASE}${raw}`
-        setVariations([])
-        setSelectedVariationId(null)
-        setLeftImage(null)
-        setLatest({ id: d.cutout.id, url, kind: 'cutout' })
+        if (mat.ok) {
+          const md = await mat.json()
+          setLatest({ id: md.material.id, url: absUrl(md.material.url), kind: 'material' })
+        } else {
+          setError('成衣渲染需启动 ComfyUI（左侧线稿已就绪）')
+        }
       } catch (e: any) {
-        setError(`上传失败: ${e.message}`)
+        setError(`处理失败: ${e.message}`)
       } finally {
         setBusy(false)
       }

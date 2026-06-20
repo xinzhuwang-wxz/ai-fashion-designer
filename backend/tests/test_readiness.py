@@ -12,16 +12,15 @@ def test_variations_requires_cutout():
     assert gate.can("variations", p.id).allowed is True
 
 
-def test_lineart_requires_selected_variation():
+def test_lineart_allowed_from_cutout_or_selected_variation():
     store = InMemoryAssetStore()
     gate = ReadinessGate(store)
     p = store.create_project()
-    cut = store.add_asset(p.id, AssetKind.CUTOUT)
-    v = store.add_asset(p.id, AssetKind.VARIATION, parent_id=cut.id)
 
-    # 有变体但未选中 → 不允许提线稿（防跳步/防"选了不生效"）
+    # 空项目不允许
     assert gate.can("lineart", p.id).allowed is False
-    store.select_variation(p.id, v.id)
+    # 有抠图即可（自动流：上传即出线稿）
+    store.add_asset(p.id, AssetKind.CUTOUT)
     assert gate.can("lineart", p.id).allowed is True
 
 
