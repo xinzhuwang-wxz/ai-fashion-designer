@@ -7,28 +7,16 @@ from __future__ import annotations
 
 import os
 import uuid
-from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
-from PIL import Image
 
 from app.assets.models import AssetKind
 from app.assets.store import AssetStore
+from app.imaging import is_valid_image
 from app.services.remove_bg import remove_background
-
-
-def _is_valid_image(data: bytes) -> bool:
-    """非空且可解码为图片 —— 入库前的最低校验（CLAUDE.md 红线 / ADR-0001）。"""
-    if not data:
-        return False
-    try:
-        Image.open(BytesIO(data)).verify()
-        return True
-    except Exception:
-        return False
 
 router = APIRouter()
 
@@ -71,7 +59,7 @@ async def upload(project_id: str, file: UploadFile = File(...)):
         return JSONResponse({"error": "project not found"}, status_code=404)
 
     raw = await file.read()
-    if not _is_valid_image(raw):
+    if not is_valid_image(raw):
         return JSONResponse(
             {"error": "上传不是有效图片"}, status_code=422
         )
@@ -81,7 +69,7 @@ async def upload(project_id: str, file: UploadFile = File(...)):
     )
 
     cutout_bytes = remove_background(raw)
-    if not _is_valid_image(cutout_bytes):
+    if not is_valid_image(cutout_bytes):
         return JSONResponse(
             {"error": "抠图返回空/无效结果，未创建 Cutout"}, status_code=502
         )
