@@ -18,11 +18,11 @@ app = FastAPI(title="AI Fashion Designer", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
+    # 本地开发：放行任意源（含 localhost/127.0.0.1/LAN IP 任意端口）。
+    # 无凭据需求，故不与 allow_credentials 冲突。生产环境收敛见 #5。
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
 
 

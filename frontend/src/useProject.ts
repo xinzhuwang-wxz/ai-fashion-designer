@@ -31,15 +31,25 @@ export function useProject() {
     }
   }, [])
 
+  // 按需确保有项目：初始建项目若失败/未完成，上传时再建一次，避免按钮卡死
+  const ensureProject = useCallback(async (): Promise<string> => {
+    if (projectId) return projectId
+    const r = await fetch(`${API_BASE}/api/projects`, { method: 'POST' })
+    if (!r.ok) throw new Error(`建项目失败 HTTP ${r.status}`)
+    const d = await r.json()
+    setProjectId(d.project_id)
+    return d.project_id
+  }, [projectId])
+
   const upload = useCallback(
     async (file: File) => {
-      if (!projectId) return
       setBusy(true)
       setError('')
       try {
+        const pid = await ensureProject()
         const fd = new FormData()
         fd.append('file', file)
-        const r = await fetch(`${API_BASE}/api/projects/${projectId}/upload`, {
+        const r = await fetch(`${API_BASE}/api/projects/${pid}/upload`, {
           method: 'POST',
           body: fd,
         })
@@ -54,7 +64,7 @@ export function useProject() {
         setBusy(false)
       }
     },
-    [projectId],
+    [ensureProject],
   )
 
   return { projectId, latest, busy, error, upload, apiBase: API_BASE }

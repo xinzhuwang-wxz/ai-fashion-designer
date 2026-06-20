@@ -1,4 +1,3 @@
-import { useRef } from 'react'
 import { Tldraw } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { useProject } from './useProject'
@@ -9,33 +8,30 @@ import { useProject } from './useProject'
 // 草图优先入口、seed/材质栏为占位，分别在 #8 / #6 接入。
 export default function App() {
   const { projectId, latest, busy, error, upload } = useProject()
-  const fileRef = useRef<HTMLInputElement>(null)
 
   return (
     <div className="workbench">
       <header className="wb-top">
         <span className="wb-title">AI Fashion Designer</span>
         <span className="wb-spacer" />
-        {busy && <span className="wb-busy">AI 处理中…</span>}
-        <button
-          className="wb-btn"
-          disabled={!projectId || busy}
-          onClick={() => fileRef.current?.click()}
-        >
-          上传参考图
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          hidden
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            if (f) upload(f)
-          }}
-        />
+        {/* label 包裹 file input：点 label 原生触发文件框，避开 Safari/Mac 对
+            隐藏 input 调用 .click() 的限制 */}
+        <label className="wb-btn">
+          {busy ? 'AI 处理中…' : '上传参考图'}
+          <input
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            disabled={busy}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) upload(f)
+              e.currentTarget.value = ''
+            }}
+          />
+        </label>
         <span className="wb-status">
-          {projectId ? `项目 ${projectId.slice(0, 12)}` : '连接后端中…'}
+          {projectId ? `项目 ${projectId.slice(0, 12)}` : '未建项目'}
         </span>
       </header>
 
@@ -52,15 +48,33 @@ export default function App() {
             成衣渲染（只读）
             <span className="wb-state">{latest ? '高质量结果' : '—'}</span>
           </div>
-          <div className="wb-render">
+          <div
+            className="wb-render"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault()
+              const f = e.dataTransfer.files?.[0]
+              if (f) upload(f)
+            }}
+          >
             {latest ? (
               <img src={latest.url} alt="成衣渲染" />
             ) : (
-              <div className="wb-placeholder">
-                上传参考图后
-                <br />
-                这里显示后端资产（Cutout）
-              </div>
+              <label className="wb-dropzone">
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  disabled={busy}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (f) upload(f)
+                    e.currentTarget.value = ''
+                  }}
+                />
+                {busy ? 'AI 处理中…' : '点此 / 拖入服装图上传'}
+                <span className="wb-dz-sub">上传后这里显示后端资产（Cutout）</span>
+              </label>
             )}
           </div>
         </section>
