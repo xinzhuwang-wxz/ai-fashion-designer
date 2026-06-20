@@ -28,10 +28,10 @@ def _make_client(store, images_dir):
 
 
 def _seed_variations(store, images_dir, pid):
-    cut = store.add_asset(pid, AssetKind.CUTOUT, file_path="cut.png")
-    for name in ("v1.png", "v2.png"):
+    for name in ("cut.png", "v1.png", "v2.png"):
         with open(os.path.join(images_dir, name), "wb") as f:
             f.write(_png())
+    cut = store.add_asset(pid, AssetKind.CUTOUT, file_path="cut.png")
     v1 = store.add_asset(pid, AssetKind.VARIATION, parent_id=cut.id, file_path="v1.png")
     v2 = store.add_asset(pid, AssetKind.VARIATION, parent_id=cut.id, file_path="v2.png")
     return cut, v1, v2
@@ -58,13 +58,27 @@ def test_lineart_derives_from_selected_variation(tmp_path):
     assert la.parent_id != cut.id
 
 
-def test_lineart_blocked_without_selection(tmp_path):
-    """有变体但未选中 → 就绪门拦截（409）。"""
+def test_lineart_from_cutout_when_no_selection(tmp_path):
+    """自动流：未选变体时，线稿从抠图直出，parent=Cutout。"""
     store = InMemoryAssetStore()
     images = str(tmp_path / "img")
     client = _make_client(store, images)
     pid = client.post("/api/projects").json()["project_id"]
-    _seed_variations(store, images, pid)  # 不选中
+    cut, _v1, _v2 = _seed_variations(store, images, pid)  # 不选中
+
+    with patch("app.assets.api.extract_lineart", return_value=Image.new("RGB", (16, 16), (250, 250, 250))):
+        r = client.post(f"/api/projects/{pid}/lineart")
+    assert r.status_code == 200
+    la = store.latest(pid, AssetKind.LINEART)
+    assert la is not None and la.parent_id == cut.id
+
+
+def test_lineart_blocked_on_empty_project(tmp_path):
+    """空项目（无抠图无变体）→ 就绪门拦截（409）。"""
+    store = InMemoryAssetStore()
+    images = str(tmp_path / "img")
+    client = _make_client(store, images)
+    pid = client.post("/api/projects").json()["project_id"]
 
     r = client.post(f"/api/projects/{pid}/lineart")
     assert r.status_code == 409

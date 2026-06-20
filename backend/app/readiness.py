@@ -27,10 +27,12 @@ class ReadinessGate:
             return Decision(False, "需要先上传参考图得到 Cutout")
 
         if operation == "lineart":
-            # 线稿来源：选中的变体（草图优先直传 Lineart 在 #8 扩展）
-            if self.store.get_selected_variation(project_id):
+            # 自动流：从抠图直出线稿；探索流：选中变体则以变体为源（见 lineart 端点）
+            if self.store.get_selected_variation(project_id) or self.store.latest(
+                project_id, AssetKind.CUTOUT
+            ):
                 return Decision(True)
-            return Decision(False, "需要先选中一个变体")
+            return Decision(False, "需要先上传参考图（或选中变体）")
 
         if operation == "material":
             if self.store.latest(project_id, AssetKind.LINEART):

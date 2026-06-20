@@ -200,10 +200,13 @@ async def lineart(project_id: str):
     if not decision.allowed:
         return JSONResponse({"error": decision.reason}, status_code=409)
 
-    selected = store.get_selected_variation(project_id)
-    src = Path(IMAGES_DIR) / selected.file_path
+    # 选中变体优先（探索流，保"选了变体生效"）；否则用最新抠图（自动流，上传即出线稿）
+    source = store.get_selected_variation(project_id) or store.latest(
+        project_id, AssetKind.CUTOUT
+    )
+    src = Path(IMAGES_DIR) / source.file_path
     if not src.exists():
-        return JSONResponse({"error": "选中变体文件缺失"}, status_code=500)
+        return JSONResponse({"error": "线稿源文件缺失"}, status_code=500)
 
     img = Image.open(src).convert("RGB")
     lineart_img = await run_in_threadpool(extract_lineart, img)
@@ -217,7 +220,7 @@ async def lineart(project_id: str):
     asset = store.add_asset(
         project_id,
         AssetKind.LINEART,
-        parent_id=selected.id,  # 关键：父=选中变体，不是 Cutout（修链路断裂）
+        parent_id=source.id,  # 父=选中变体 或 抠图
         file_path=fname,
     )
     return {"lineart": {"id": asset.id, "url": f"/api/images/{asset.file_path}"}}

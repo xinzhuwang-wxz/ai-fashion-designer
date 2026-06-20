@@ -118,8 +118,12 @@ export default function App() {
             }}
           />
         </label>
-        <button className="wb-btn wb-btn-ghost" disabled={!latest || busy} onClick={() => generateVariations(3)}>
-          生成变体
+        <button
+          className="wb-btn wb-btn-ghost"
+          disabled={(!leftImage && !latest) || busy}
+          onClick={() => generateVariations(3)}
+        >
+          换个方案
         </button>
         <button
           className="wb-btn wb-btn-ghost"
@@ -153,6 +157,12 @@ export default function App() {
           >
             {latest ? (
               <img src={latest.url} alt="成衣渲染" />
+            ) : leftImage ? (
+              <div className="wb-placeholder">
+                成衣渲染（需启动 ComfyUI）
+                <br />
+                左侧线稿已就绪；改面料后点「试穿」重渲
+              </div>
             ) : (
               <label className="wb-dropzone">
                 <input
@@ -167,7 +177,7 @@ export default function App() {
                   }}
                 />
                 点此 / 拖入服装图上传
-                <span className="wb-dz-sub">上传后这里显示后端资产（Cutout）</span>
+                <span className="wb-dz-sub">上传后自动：左出线稿、右出成衣</span>
               </label>
             )}
           </div>
