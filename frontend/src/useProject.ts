@@ -1,0 +1,61 @@
+import { useCallback, useEffect, useState } from 'react'
+
+// 运行时配置：默认 localhost，可由 Vite 环境变量覆盖（完整环境化见 #5）
+const API_BASE: string =
+  (import.meta as any).env?.VITE_API_BASE ?? 'http://localhost:8000'
+
+export type Asset = { id: string; url: string; kind: string }
+
+/**
+ * useProject —— 镜像后端某个 DesignProject 的资产（ADR-0005）。
+ * 前端不自造流程状态；右画布渲染的"最新资产"以后端返回为唯一真相源。
+ */
+export function useProject() {
+  const [projectId, setProjectId] = useState<string | null>(null)
+  const [latest, setLatest] = useState<Asset | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${API_BASE}/api/projects`, { method: 'POST' })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setProjectId(d.project_id)
+      })
+      .catch(() => {
+        if (!cancelled) setError('后端连接失败')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const upload = useCallback(
+    async (file: File) => {
+      if (!projectId) return
+      setBusy(true)
+      setError('')
+      try {
+        const fd = new FormData()
+        fd.append('file', file)
+        const r = await fetch(`${API_BASE}/api/projects/${projectId}/upload`, {
+          method: 'POST',
+          body: fd,
+        })
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const d = await r.json()
+        const raw = d.cutout.url as string
+        const url = raw.startsWith('http') ? raw : `${API_BASE}${raw}`
+        setLatest({ id: d.cutout.id, url, kind: 'cutout' })
+      } catch (e: any) {
+        setError(`上传失败: ${e.message}`)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [projectId],
+  )
+
+  return { projectId, latest, busy, error, upload, apiBase: API_BASE }
+}
