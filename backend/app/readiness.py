@@ -32,4 +32,9 @@ class ReadinessGate:
                 return Decision(True)
             return Decision(False, "需要先选中一个变体")
 
+        if operation == "material":
+            if self.store.latest(project_id, AssetKind.LINEART):
+                return Decision(True)
+            return Decision(False, "需要先提取线稿")
+
         return Decision(False, f"未知操作: {operation}")

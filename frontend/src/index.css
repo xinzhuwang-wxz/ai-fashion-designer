@@ -206,24 +206,34 @@ body,
   border-top: 1px solid #2a313d;
 }
 
-.wb-field {
-  font-size: 12px;
-  color: #8a93a2;
+.wb-bottom {
+  flex-wrap: wrap;
+}
+
+.wb-fabrics {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
-.wb-seed {
-  width: 90px;
+.wb-chip {
+  padding: 4px 9px;
+  font-size: 11px;
+  border: 1px solid #2a313d;
+  border-radius: 12px;
+  background: transparent;
+  color: #8a93a2;
+  cursor: pointer;
 }
 
-.wb-material {
-  flex: 1;
+.wb-chip.sel {
+  background: #2d6cdf;
+  border-color: #2d6cdf;
+  color: #fff;
 }
 
-.wb-seed,
-.wb-material {
+.wb-mini {
+  width: 130px;
   padding: 6px 10px;
   border: 1px solid #2a313d;
   border-radius: 6px;

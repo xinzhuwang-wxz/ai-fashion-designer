@@ -12,7 +12,8 @@ export type Asset = { id: string; url: string; kind: string }
  */
 export function useProject() {
   const [projectId, setProjectId] = useState<string | null>(null)
-  const [latest, setLatest] = useState<Asset | null>(null)
+  const [latest, setLatest] = useState<Asset | null>(null) // 右画布：渲染成衣
+  const [leftImage, setLeftImage] = useState<string | null>(null) // 左画布：可编辑线稿
   const [variations, setVariations] = useState<Asset[]>([])
   const [selectedVariationId, setSelectedVariationId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -61,6 +62,7 @@ export function useProject() {
         const url = raw.startsWith('http') ? raw : `${API_BASE}${raw}`
         setVariations([])
         setSelectedVariationId(null)
+        setLeftImage(null)
         setLatest({ id: d.cutout.id, url, kind: 'cutout' })
       } catch (e: any) {
         setError(`上传失败: ${e.message}`)
@@ -130,7 +132,7 @@ export function useProject() {
       const d = await r.json()
       const raw = d.lineart.url as string
       const url = raw.startsWith('http') ? raw : `${API_BASE}${raw}`
-      setLatest({ id: d.lineart.id, url, kind: 'lineart' })
+      setLeftImage(url) // 线稿进【左】可编辑画布，不是右画布
     } catch (e: any) {
       setError(`线稿提取失败: ${e.message}`)
     } finally {
@@ -138,9 +140,35 @@ export function useProject() {
     }
   }, [projectId])
 
+  const applyMaterial = useCallback(
+    async (params: { fabric: string; color?: string; pattern?: string; custom?: string }) => {
+      if (!projectId) return
+      setBusy(true)
+      setError('')
+      try {
+        const r = await fetch(`${API_BASE}/api/projects/${projectId}/material`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+        })
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const d = await r.json()
+        const raw = d.material.url as string
+        const url = raw.startsWith('http') ? raw : `${API_BASE}${raw}`
+        setLatest({ id: d.material.id, url, kind: 'material' }) // 成衣渲染进【右】画布
+      } catch (e: any) {
+        setError(`布料渲染失败: ${e.message}`)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [projectId],
+  )
+
   return {
     projectId,
     latest,
+    leftImage,
     variations,
     selectedVariationId,
     busy,
@@ -149,6 +177,7 @@ export function useProject() {
     generateVariations,
     selectVariation,
     extractLineart,
+    applyMaterial,
     setLatest,
     apiBase: API_BASE,
   }
