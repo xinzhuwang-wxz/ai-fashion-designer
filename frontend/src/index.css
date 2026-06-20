@@ -150,6 +150,25 @@ body,
   color: #27ae60;
 }
 
+.wb-label-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wb-link {
+  background: none;
+  border: 0;
+  color: #6ea0ff;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+
+.wb-link:hover {
+  text-decoration: underline;
+}
+
 .wb-canvas-host {
   flex: 1;
   min-height: 0;

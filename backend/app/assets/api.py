@@ -377,6 +377,25 @@ async def edit(project_id: str, req: EditRequest):
     return {"edit": {"id": asset.id, "url": f"/api/images/{asset.file_path}"}}
 
 
+@router.get("/projects/{project_id}/export")
+async def export_project(project_id: str):
+    """场景6：导出/恢复用——项目各阶段最新资产 + 生成参数（下载导出 & 重开恢复共用）。"""
+    store = _require_store()
+    if store.get_project(project_id) is None:
+        return JSONResponse({"error": "project not found"}, status_code=404)
+    assets = {}
+    for kind in AssetKind:
+        a = store.latest(project_id, kind)
+        if a:
+            assets[kind.value] = {
+                "id": a.id,
+                "url": f"/api/images/{a.file_path}" if a.file_path else None,
+                "params": a.params,
+                "seed": a.seed,
+            }
+    return {"project_id": project_id, "assets": assets}
+
+
 @router.get("/images/{filename}")
 async def serve_image(filename: str):
     path = Path(IMAGES_DIR) / filename
