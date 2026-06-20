@@ -24,6 +24,7 @@ from app.generation.backend import ComfyUIBackend, HttpComfyUIBackend
 from app.generation.job import GenerationError, run_generation
 from app.imaging import is_valid_image
 from app.readiness import ReadinessGate
+from app.services.comfyui_client import FABRIC_PROMPTS
 from app.services.lineart import extract_lineart
 from app.services.remove_bg import remove_background
 
@@ -220,6 +221,75 @@ async def lineart(project_id: str):
         file_path=fname,
     )
     return {"lineart": {"id": asset.id, "url": f"/api/images/{asset.file_path}"}}
+
+
+class MaterialRequest(BaseModel):
+    fabric: str = "silk"
+    color: Optional[str] = ""
+    pattern: Optional[str] = ""
+    custom: Optional[str] = ""
+
+
+def _build_material_prompt(req: "MaterialRequest") -> str:
+    fabric_base = FABRIC_PROMPTS.get(req.fabric, req.fabric)
+    color = (req.color or "").strip()
+    pattern = (req.pattern or "").strip()
+    custom = (req.custom or "").strip()
+    parts = [color, f"{pattern} pattern" if pattern else "", fabric_base, custom]
+    return ", ".join(p for p in parts if p)
+
+
+@router.post("/projects/{project_id}/material")
+async def material(project_id: str, req: MaterialRequest):
+    """场景4 布料试穿：线稿 + 面料/颜色/图案/自定义 → ControlNet 渲染成衣（Material 资产）。"""
+    store = _require_store()
+    if store.get_project(project_id) is None:
+        return JSONResponse({"error": "project not found"}, status_code=404)
+
+    decision = ReadinessGate(store).can("material", project_id)
+    if not decision.allowed:
+        return JSONResponse({"error": decision.reason}, status_code=409)
+
+    lineart = store.latest(project_id, AssetKind.LINEART)
+    src = Path(IMAGES_DIR) / lineart.file_path
+    if not src.exists():
+        return JSONResponse({"error": "线稿文件缺失"}, status_code=500)
+
+    b64 = base64.b64encode(src.read_bytes()).decode()
+    prompt = _build_material_prompt(req)
+    seed = 42
+    inputs = {
+        "uploads": [{"node": "2", "b64": b64, "name": "lineart_input.png"}],
+        "set": [
+            ["3", "text", prompt],
+            ["5", "control_net_name", "control_v11p_sd15_lineart.pth"],
+            ["8", "seed", seed],
+        ],
+    }
+    try:
+        asset = await run_in_threadpool(
+            run_generation,
+            _comfyui_backend(),
+            store,
+            _save_bytes,
+            project_id=project_id,
+            kind=AssetKind.MATERIAL,
+            workflow_name="fabric_fill_controlnet.json",
+            inputs=inputs,
+            parent_id=lineart.id,
+            seed=seed,
+            params={
+                "fabric": req.fabric,
+                "color": req.color,
+                "pattern": req.pattern,
+                "custom": req.custom,
+                "prompt": prompt,
+            },
+        )
+    except GenerationError as e:
+        return JSONResponse({"error": f"布料渲染失败: {e}"}, status_code=502)
+
+    return {"material": {"id": asset.id, "url": f"/api/images/{asset.file_path}"}}
 
 
 @router.get("/images/{filename}")

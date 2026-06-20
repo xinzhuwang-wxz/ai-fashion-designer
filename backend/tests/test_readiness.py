@@ -25,6 +25,15 @@ def test_lineart_requires_selected_variation():
     assert gate.can("lineart", p.id).allowed is True
 
 
+def test_material_requires_lineart():
+    store = InMemoryAssetStore()
+    gate = ReadinessGate(store)
+    p = store.create_project()
+    assert gate.can("material", p.id).allowed is False
+    store.add_asset(p.id, AssetKind.LINEART)
+    assert gate.can("material", p.id).allowed is True
+
+
 def test_cannot_skip_to_lineart_from_empty_project():
     store = InMemoryAssetStore()
     gate = ReadinessGate(store)
