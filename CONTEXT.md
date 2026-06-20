@@ -24,6 +24,10 @@ _Avoid_: task、request、调用
 
 ### 资产类型（DesignAsset 的 kind）
 
+**Upload（上传原图）**:
+用户上传的原始服装照片，作为谱系的根资产；抠图链路由它派生 Cutout。
+_Avoid_: 原图、source image
+
 **Cutout（抠图）**:
 去除背景后只剩干净服装轮廓的资产。
 _Avoid_: removed_bg、分割图
