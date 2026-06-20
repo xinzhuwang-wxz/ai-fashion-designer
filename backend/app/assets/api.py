@@ -6,6 +6,7 @@ set_asset_store 注入，便于测试替换为内存 adapter。
 from __future__ import annotations
 
 import base64
+import io
 import os
 import uuid
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, File, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
+from PIL import Image
 from pydantic import BaseModel
 
 from app.assets.models import AssetKind
@@ -21,6 +23,8 @@ from app.assets.store import AssetStore
 from app.generation.backend import ComfyUIBackend, HttpComfyUIBackend
 from app.generation.job import GenerationError, run_generation
 from app.imaging import is_valid_image
+from app.readiness import ReadinessGate
+from app.services.lineart import extract_lineart
 from app.services.remove_bg import remove_background
 
 router = APIRouter()
@@ -161,6 +165,61 @@ async def variations(project_id: str, req: VariationRequest):
         return JSONResponse({"error": f"变体生成失败: {e}"}, status_code=502)
 
     return {"project_id": project_id, "variations": results}
+
+
+class SelectVariationRequest(BaseModel):
+    variation_id: str
+
+
+@router.post("/projects/{project_id}/select-variation")
+async def select_variation(project_id: str, req: SelectVariationRequest):
+    """场景3：选中某变体并写入后端（后续线稿以它为来源）。"""
+    store = _require_store()
+    if store.get_project(project_id) is None:
+        return JSONResponse({"error": "project not found"}, status_code=404)
+    asset = store.get_asset(req.variation_id)
+    if (
+        asset is None
+        or asset.project_id != project_id
+        or asset.kind != AssetKind.VARIATION
+    ):
+        return JSONResponse({"error": "不是该项目的有效变体"}, status_code=400)
+    store.select_variation(project_id, req.variation_id)
+    return {"selected_variation": req.variation_id}
+
+
+@router.post("/projects/{project_id}/lineart")
+async def lineart(project_id: str):
+    """场景3：从【选中变体】提取线稿（非 Cutout）。就绪门拦截未选中/跳步。"""
+    store = _require_store()
+    if store.get_project(project_id) is None:
+        return JSONResponse({"error": "project not found"}, status_code=404)
+
+    decision = ReadinessGate(store).can("lineart", project_id)
+    if not decision.allowed:
+        return JSONResponse({"error": decision.reason}, status_code=409)
+
+    selected = store.get_selected_variation(project_id)
+    src = Path(IMAGES_DIR) / selected.file_path
+    if not src.exists():
+        return JSONResponse({"error": "选中变体文件缺失"}, status_code=500)
+
+    img = Image.open(src).convert("RGB")
+    lineart_img = await run_in_threadpool(extract_lineart, img)
+    buf = io.BytesIO()
+    lineart_img.save(buf, format="PNG")
+    data = buf.getvalue()
+    if not is_valid_image(data):
+        return JSONResponse({"error": "线稿提取返回无效结果"}, status_code=502)
+
+    fname = _save_bytes("lineart", data)
+    asset = store.add_asset(
+        project_id,
+        AssetKind.LINEART,
+        parent_id=selected.id,  # 关键：父=选中变体，不是 Cutout（修链路断裂）
+        file_path=fname,
+    )
+    return {"lineart": {"id": asset.id, "url": f"/api/images/{asset.file_path}"}}
 
 
 @router.get("/images/{filename}")

@@ -14,6 +14,7 @@ export function useProject() {
   const [projectId, setProjectId] = useState<string | null>(null)
   const [latest, setLatest] = useState<Asset | null>(null)
   const [variations, setVariations] = useState<Asset[]>([])
+  const [selectedVariationId, setSelectedVariationId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -59,6 +60,7 @@ export function useProject() {
         const raw = d.cutout.url as string
         const url = raw.startsWith('http') ? raw : `${API_BASE}${raw}`
         setVariations([])
+        setSelectedVariationId(null)
         setLatest({ id: d.cutout.id, url, kind: 'cutout' })
       } catch (e: any) {
         setError(`上传失败: ${e.message}`)
@@ -98,14 +100,55 @@ export function useProject() {
     [projectId],
   )
 
+  const selectVariation = useCallback(
+    async (v: Asset) => {
+      setLatest(v)
+      setSelectedVariationId(v.id)
+      if (!projectId) return
+      try {
+        await fetch(`${API_BASE}/api/projects/${projectId}/select-variation`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ variation_id: v.id }),
+        })
+      } catch {
+        /* 选中失败不阻塞预览；提线稿时后端会再校验 */
+      }
+    },
+    [projectId],
+  )
+
+  const extractLineart = useCallback(async () => {
+    if (!projectId) return
+    setBusy(true)
+    setError('')
+    try {
+      const r = await fetch(`${API_BASE}/api/projects/${projectId}/lineart`, {
+        method: 'POST',
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const d = await r.json()
+      const raw = d.lineart.url as string
+      const url = raw.startsWith('http') ? raw : `${API_BASE}${raw}`
+      setLatest({ id: d.lineart.id, url, kind: 'lineart' })
+    } catch (e: any) {
+      setError(`线稿提取失败: ${e.message}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [projectId])
+
   return {
     projectId,
     latest,
     variations,
+    selectedVariationId,
     busy,
     error,
     upload,
     generateVariations,
+    selectVariation,
+    extractLineart,
     setLatest,
     apiBase: API_BASE,
   }

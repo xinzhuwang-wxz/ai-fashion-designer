@@ -40,11 +40,16 @@ class AssetStore(Protocol):
         self, asset_id: str, kind: Optional[AssetKind] = None
     ) -> list[DesignAsset]: ...
 
+    def select_variation(self, project_id: str, asset_id: str) -> None: ...
+
+    def get_selected_variation(self, project_id: str) -> Optional[DesignAsset]: ...
+
 
 class InMemoryAssetStore:
     def __init__(self) -> None:
         self._projects: dict[str, DesignProject] = {}
         self._assets: dict[str, DesignAsset] = {}
+        self._selected: dict[str, str] = {}
 
     def create_project(self) -> DesignProject:
         project = DesignProject()
@@ -97,6 +102,13 @@ class InMemoryAssetStore:
             if a.parent_id == asset_id and (kind is None or a.kind == kind)
         ]
 
+    def select_variation(self, project_id: str, asset_id: str) -> None:
+        self._selected[project_id] = asset_id
+
+    def get_selected_variation(self, project_id: str) -> Optional[DesignAsset]:
+        asset_id = self._selected.get(project_id)
+        return self._assets.get(asset_id) if asset_id else None
+
 
 def _row_to_asset(row: sqlite3.Row) -> DesignAsset:
     return DesignAsset(
@@ -134,6 +146,10 @@ class SqliteAssetStore:
             "id TEXT PRIMARY KEY, project_id TEXT, kind TEXT, parent_id TEXT, "
             "params TEXT, seed INTEGER, model TEXT, status TEXT, "
             "file_path TEXT, created_at TEXT)"
+        )
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS selections ("
+            "project_id TEXT PRIMARY KEY, variation_id TEXT)"
         )
         self._conn.commit()
 
@@ -228,3 +244,20 @@ class SqliteAssetStore:
                     (asset_id, kind.value),
                 ).fetchall()
         return [_row_to_asset(r) for r in rows]
+
+    def select_variation(self, project_id: str, asset_id: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO selections (project_id, variation_id) "
+                "VALUES (?, ?)",
+                (project_id, asset_id),
+            )
+            self._conn.commit()
+
+    def get_selected_variation(self, project_id: str) -> Optional[DesignAsset]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT variation_id FROM selections WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+        return self.get_asset(row["variation_id"]) if row else None
