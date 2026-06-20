@@ -8,7 +8,12 @@ import httpx
 from pathlib import Path
 from typing import Optional
 
-COMFYUI_BASE = "http://localhost:8188"
+from app.generation.backend import comfyui_base_url
+from app.generation.job import GenerationError
+from app.imaging import is_valid_image
+
+# 不再硬编码：统一从 env COMFYUI_URL 读取（ADR-0006，修部署缺陷）
+COMFYUI_BASE = comfyui_base_url()
 # 工作流 JSON 是本项目源码，独立于 vendored comfyui（后者整体不入库）
 WORKFLOWS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "workflows"
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent.parent / "comfyui" / "output"
@@ -123,8 +128,11 @@ async def generate_variations(
             img_bytes = await _fetch_output_image(
                 img_info["filename"], img_info["subfolder"]
             )
-            results.append(base64.b64encode(img_bytes).decode())
-    
+            if is_valid_image(img_bytes):
+                results.append(base64.b64encode(img_bytes).decode())
+
+    if not results:
+        raise GenerationError("ComfyUI 变体返回空/无效结果")
     return results
 
 
@@ -153,9 +161,11 @@ async def fabric_fill(
     
     images = _collect_output_images(outputs)
     if not images:
-        return ""
+        raise GenerationError("ComfyUI 返回空结果（无输出图）")
     
     img_bytes = await _fetch_output_image(images[0]["filename"], images[0]["subfolder"])
+    if not is_valid_image(img_bytes):
+        raise GenerationError("ComfyUI 返回无效图片")
     return base64.b64encode(img_bytes).decode()
 
 
@@ -214,9 +224,11 @@ async def inpaint_with_lcm(
 
     images = _collect_output_images(outputs)
     if not images:
-        return ""
+        raise GenerationError("ComfyUI 返回空结果（无输出图）")
 
     img_bytes = await _fetch_output_image(images[0]["filename"], images[0]["subfolder"])
+    if not is_valid_image(img_bytes):
+        raise GenerationError("ComfyUI 返回无效图片")
     return base64.b64encode(img_bytes).decode()
 
 
@@ -245,7 +257,9 @@ async def final_render(
 
     images = _collect_output_images(outputs)
     if not images:
-        return ""
+        raise GenerationError("ComfyUI 返回空结果（无输出图）")
 
     img_bytes = await _fetch_output_image(images[0]["filename"], images[0]["subfolder"])
+    if not is_valid_image(img_bytes):
+        raise GenerationError("ComfyUI 返回无效图片")
     return base64.b64encode(img_bytes).decode()
