@@ -1,0 +1,56 @@
+"""
+AI 服装设计工具 — FastAPI 后端入口
+M4 适配版：抠图/线稿本地跑，变体/填充走 ComfyUI MPS 或云端 GPU
+"""
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
+from app.api import router as api_router, set_state_machine
+from app.services.state_machine import DesignStateMachine
+
+app = FastAPI(title="AI Fashion Designer", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+
+# WebSocket CORS: ensure upgrade handshake passes CORS
+class WebSocketCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # 对 WebSocket upgrade 请求，Origin 不在 allow_origins 时手动放行
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            origin = request.headers.get("origin", "")
+            if origin.startswith("http://localhost:3000"):
+                # 放行，让 WebSocket 端点自行处理
+                pass
+        response = await call_next(request)
+        return response
+
+
+app.add_middleware(WebSocketCORSMiddleware)
+
+# 全局状态机
+state_machine = DesignStateMachine()
+set_state_machine(state_machine)
+
+app.include_router(api_router, prefix="/api")
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "gpu": "mps" if _has_mps() else "cpu"}
+
+
+def _has_mps() -> bool:
+    try:
+        import torch
+        return torch.backends.mps.is_available()
+    except Exception:
+        return False

@@ -1,0 +1,28 @@
+# AI 服装设计工具 — M4 适配版
+# M4 (Apple Silicon) 上运行需注意：
+# - StreamDiffusion 不可用（依赖 CUDA），实时预览用 ComfyUI + MPS 替代
+# - 大模型推理较慢，建议高质量重绘走云端 GPU
+# - rembg / controlnet_aux / SAM2 均可 MPS 运行
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-socketio>=5.11.0
+websockets>=13.0
+rembg>=2.0.60
+opencv-python-headless>=4.10.0
+Pillow>=10.4.0
+numpy>=1.26.0
+httpx>=0.27.0
+python-multipart>=0.0.12
+pydantic>=2.9.0
+aiofiles>=24.0.0
+
+# 推理相关（按需安装，模型文件大）
+# torch>=2.4.0  # PyTorch MPS backend
+# diffusers>=0.30.0
+# transformers>=4.44.0
+# controlnet_aux>=0.0.8
+
+# 备选：云端 GPU 方案
+# replicate>=0.34.0  # 云端推理
+# modal>=0.64.0      # 无服务器 GPU

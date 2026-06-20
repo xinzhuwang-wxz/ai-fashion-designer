@@ -1,0 +1,46 @@
+# AI Fashion Designer
+# 注意：M4 Mac 上 StreamDiffusion 不可用（依赖 CUDA）
+# ComfyUI 走 MPS 后端，推理较慢但可用
+# 建议：高质量重绘走云端 GPU（Modal / Replicate）
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+    environment:
+      - COMFYUI_URL=http://comfyui:8188
+      - PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      - backend
+
+  # ComfyUI — 可选，本地推理
+  # M4 上可直接跑，不需要 Docker
+  # 如果本地跑：python main.py --listen 0.0.0.0 --port 8188
+  # comfyui:
+  #   image: comfyanonymous/comfyui:latest
+  #   ports:
+  #     - "8188:8188"
+  #   volumes:
+  #     - ./comfyui/models:/app/models
+  #     - ./comfyui/workflows:/app/workflows
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - capabilities: [gpu]

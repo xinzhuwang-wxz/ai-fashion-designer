@@ -1,0 +1,29 @@
+# === Python (backend) ===
+backend/venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# === Node (frontend) ===
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# === 生成图片 / 数据 / DB ===
+backend/static/images/*.png
+data/
+*.sqlite
+*.sqlite3
+*.db
+
+# === Vendored ComfyUI 应用 + 模型 + 其自带 .git（7G+，不入库）===
+# 整体忽略；我们自己的工作流 JSON 已迁到仓库根 workflows/
+/comfyui
+
+# === OS / 编辑器 ===
+.DS_Store
+*.swp
+.idea/
+.vscode/
