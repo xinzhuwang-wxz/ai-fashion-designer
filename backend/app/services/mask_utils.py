@@ -6,6 +6,28 @@ import cv2
 import numpy as np
 
 
+def normalized_strokes_to_mask(
+    points: list[dict],
+    img_w: int,
+    img_h: int,
+    brush_frac: float = 0.06,
+) -> np.ndarray:
+    """图像归一化坐标 [0,1] → 按图像像素尺寸生成 mask（ADR-0003 坐标对齐核心）。
+
+    画布缩放/平移的转换由前端完成（前端发归一化图像坐标），后端只按图尺寸落点，
+    因此任意缩放/平移下 mask 都与落笔位置对齐。
+    """
+    mask = np.zeros((img_h, img_w), dtype=np.uint8)
+    radius = max(1, int(brush_frac * min(img_w, img_h) / 2))
+    for p in points:
+        x = int(round(float(p.get("x", 0)) * img_w))
+        y = int(round(float(p.get("y", 0)) * img_h))
+        x = max(0, min(img_w - 1, x))
+        y = max(0, min(img_h - 1, y))
+        cv2.circle(mask, (x, y), radius, 255, -1)
+    return mask
+
+
 def stroke_to_mask(
     stroke_points: list[dict],
     canvas_width: int,

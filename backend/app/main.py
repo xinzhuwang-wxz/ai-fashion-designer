@@ -67,3 +67,12 @@ def _has_mps() -> bool:
         return torch.backends.mps.is_available()
     except Exception:
         return False
+
+
+# 单端口部署：前端已构建(dist 存在)时由后端一并伺服 → 一个端口=完整网页，
+# 供 AutoDL 端口映射成公网网址直接浏览器体验。本地 vite 开发(无 dist)不受影响。
+_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if _dist.exists():
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=str(_dist), html=True), name="frontend")

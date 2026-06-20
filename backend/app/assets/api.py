@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+import random
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -26,6 +27,7 @@ from app.imaging import is_valid_image
 from app.readiness import ReadinessGate
 from app.services.comfyui_client import FABRIC_PROMPTS
 from app.services.lineart import extract_lineart
+from app.services.mask_utils import normalized_strokes_to_mask
 from app.services.remove_bg import remove_background
 
 router = APIRouter()
@@ -309,6 +311,70 @@ async def lineart_image(project_id: str, file: UploadFile = File(...)):
         project_id, AssetKind.LINEART, parent_id=None, file_path=fname
     )
     return {"lineart": {"id": asset.id, "url": f"/api/images/{asset.file_path}"}}
+
+
+class EditRequest(BaseModel):
+    strokes: list[dict] = []  # 图像归一化坐标 [0,1]
+    prompt: Optional[str] = ""
+    brush_frac: float = 0.06
+    strength: float = 0.6
+
+
+@router.post("/projects/{project_id}/edit")
+async def edit(project_id: str, req: EditRequest):
+    """场景5 局部编辑：笔触(归一化坐标)→mask→masked inpaint（只改 mask 区域，mask 外稳定）。"""
+    store = _require_store()
+    if store.get_project(project_id) is None:
+        return JSONResponse({"error": "project not found"}, status_code=404)
+    if not ReadinessGate(store).can("edit", project_id).allowed:
+        return JSONResponse({"error": "需要先有成衣渲染"}, status_code=409)
+    if not req.strokes:
+        return JSONResponse({"error": "没有笔触"}, status_code=400)
+
+    source = None
+    for k in (AssetKind.EDIT, AssetKind.MATERIAL, AssetKind.VARIATION):
+        source = store.latest(project_id, k)
+        if source:
+            break
+    src = Path(IMAGES_DIR) / source.file_path
+    if not src.exists():
+        return JSONResponse({"error": "源图文件缺失"}, status_code=500)
+
+    img = Image.open(src).convert("RGB")
+    w, h = img.size
+    mask = normalized_strokes_to_mask(req.strokes, w, h, req.brush_frac)
+    mbuf = io.BytesIO()
+    Image.fromarray(mask).save(mbuf, format="PNG")
+
+    seed = random.randint(1, 1_000_000)
+    inputs = {
+        "uploads": [
+            {"node": "2", "b64": base64.b64encode(src.read_bytes()).decode(), "name": "edit_src.png"},
+            {"node": "3", "b64": base64.b64encode(mbuf.getvalue()).decode(), "name": "edit_mask.png"},
+        ],
+        "set": [
+            ["7", "text", req.prompt or "fashion design, refined detail"],
+            ["9", "seed", seed],
+            ["9", "denoise", req.strength],
+        ],
+    }
+    try:
+        asset = await run_in_threadpool(
+            run_generation,
+            _comfyui_backend(),
+            store,
+            _save_bytes,
+            project_id=project_id,
+            kind=AssetKind.EDIT,
+            workflow_name="edit_inpaint.json",
+            inputs=inputs,
+            parent_id=source.id,
+            seed=seed,
+            params={"prompt": req.prompt, "strength": req.strength, "n_strokes": len(req.strokes)},
+        )
+    except GenerationError as e:
+        return JSONResponse({"error": f"局部重绘失败: {e}"}, status_code=502)
+    return {"edit": {"id": asset.id, "url": f"/api/images/{asset.file_path}"}}
 
 
 @router.get("/images/{filename}")
