@@ -2,8 +2,23 @@
 Mask 生成 + 变化检测 + 无缝混合
 画师笔触 → OpenCV 处理 → inpainting mask
 """
+import io
+
 import cv2
 import numpy as np
+from PIL import Image, ImageOps
+
+
+def invert_lineart(png_bytes: bytes) -> bytes:
+    """黑线白底（人看/手绘/画板）→ 白线黑底（controlnet_aux lineart 模型要的格式）。
+
+    本管线统一：显示/编辑用黑线白底；喂 ControlNet 前在此边界转白线黑底，渲出实心成衣
+    （黑线白底直喂会渲成线框）。
+    """
+    img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+    out = io.BytesIO()
+    ImageOps.invert(img).save(out, format="PNG")
+    return out.getvalue()
 
 
 def normalized_strokes_to_mask(
@@ -75,3 +90,42 @@ def simple_blend(
     mask_3ch = np.stack([mask / 255.0] * 3, axis=-1)
     blended = result * mask_3ch + original * (1 - mask_3ch)
     return blended.astype(np.uint8)
+
+
+def composite_subject_lock_bytes(
+    source_png: bytes,
+    rendered_png: bytes,
+    mask_png: bytes,
+    feather: int = 10,
+) -> bytes:
+    """字节版主体锁定：底图/渲染/mask 都是 PNG bytes；mask 白=改动区（保留渲染），黑=保留底图。"""
+    src = Image.open(io.BytesIO(source_png)).convert("RGB")
+    mask = np.array(Image.open(io.BytesIO(mask_png)).convert("L").resize(src.size))
+    return composite_subject_lock(src, rendered_png, mask, feather)
+
+
+def composite_subject_lock(
+    source: Image.Image,
+    rendered_png: bytes,
+    mask: np.ndarray,
+    feather: int = 12,
+) -> bytes:
+    """主体锁定（#24）：渲染只在 mask 区域生效，mask 外严格保留原图像素。
+
+    扩散即便全局漂移，合成后 mask 外权重=0 → 与原图逐像素一致，主体不动；
+    羽化让边界平滑过渡（feather=0 则硬边）。返回 PNG bytes。
+    """
+    src = np.array(source.convert("RGB"))
+    h, w = src.shape[:2]
+    rnd = Image.open(io.BytesIO(rendered_png)).convert("RGB")
+    if rnd.size != (w, h):
+        rnd = rnd.resize((w, h))
+    rnd_np = np.array(rnd)
+    m = mask.astype(np.float32)
+    if feather > 0:
+        k = feather * 2 + 1
+        m = cv2.GaussianBlur(m, (k, k), 0)
+    blended = simple_blend(rnd_np, src, m)
+    out = io.BytesIO()
+    Image.fromarray(blended).save(out, format="PNG")
+    return out.getvalue()

@@ -175,6 +175,86 @@ body,
   position: relative;
 }
 
+/* 意图笔刷条（#27：画的是 口袋/纽扣/褶皱…） */
+.wb-intents {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: #11151c;
+  border-bottom: 1px solid #2a313d;
+}
+
+.wb-intents-label {
+  font-size: 12px;
+  color: #8a93a2;
+  margin-right: 4px;
+}
+
+/* 栅格画布（像素画板，仿 Krea/Vizcom） */
+.paint-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.paint-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #141923;
+  border-bottom: 1px solid #2a313d;
+}
+
+.paint-tool {
+  font-size: 12px;
+  padding: 4px 12px;
+  border: 1px solid #2a313d;
+  border-radius: 6px;
+  background: transparent;
+  color: #8a93a2;
+  cursor: pointer;
+}
+
+.paint-tool.sel {
+  background: #2d6cdf;
+  border-color: #2d6cdf;
+  color: #fff;
+}
+
+.paint-size {
+  width: 120px;
+}
+
+.paint-size-label {
+  font-size: 11px;
+  color: #8a93a2;
+  min-width: 34px;
+}
+
+.paint-host {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f131a;
+  padding: 12px;
+}
+
+.paint-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  cursor: crosshair;
+  touch-action: none;
+}
+
 .wb-render {
   flex: 1;
   display: flex;

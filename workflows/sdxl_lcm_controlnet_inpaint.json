@@ -1,0 +1,100 @@
+{
+  "1": {
+    "inputs": { "ckpt_name": "sd_xl_base_1.0.safetensors" },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "Load SDXL Checkpoint" }
+  },
+  "11": {
+    "inputs": {
+      "lora_name": "lcm-lora-sdxl.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": ["1", 0],
+      "clip": ["1", 1]
+    },
+    "class_type": "LoraLoader",
+    "_meta": { "title": "Load LCM-LoRA-SDXL (8 步)" }
+  },
+  "2": {
+    "inputs": { "image": "INPUT_SOURCE", "upload": "image" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Load Source (右侧当前成衣)" }
+  },
+  "3": {
+    "inputs": { "image": "INPUT_MASK", "channel": "red", "upload": "image" },
+    "class_type": "LoadImageMask",
+    "_meta": { "title": "Load 改动区 Mask" }
+  },
+  "12": {
+    "inputs": { "image": "INPUT_SKETCH", "upload": "image" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Load Sketch (左侧改后线稿, 白线黑底)" }
+  },
+  "5": {
+    "inputs": { "control_net_name": "INPUT_CONTROLNET" },
+    "class_type": "ControlNetLoader",
+    "_meta": { "title": "Load SDXL ControlNet" }
+  },
+  "6": {
+    "inputs": {
+      "grow_mask_by": 8,
+      "pixels": ["2", 0],
+      "vae": ["1", 2],
+      "mask": ["3", 0]
+    },
+    "class_type": "VAEEncodeForInpaint",
+    "_meta": { "title": "VAE Encode (只采样改动区)" }
+  },
+  "7": {
+    "inputs": { "text": "INPUT_PROMPT", "clip": ["11", 1] },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Positive" }
+  },
+  "8": {
+    "inputs": {
+      "text": "ugly, blurry, low quality, distorted, watermark, text, flat, 2d",
+      "clip": ["11", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Negative" }
+  },
+  "13": {
+    "inputs": {
+      "strength": 0.9,
+      "start_percent": 0.0,
+      "end_percent": 0.8,
+      "positive": ["7", 0],
+      "negative": ["8", 0],
+      "control_net": ["5", 0],
+      "image": ["12", 0]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": { "title": "Apply ControlNet (改动区 强度0.9/end0.8 加遵循)" }
+  },
+  "9": {
+    "inputs": {
+      "seed": "INPUT_SEED",
+      "steps": 8,
+      "cfg": 1.5,
+      "sampler_name": "lcm",
+      "scheduler": "sgm_uniform",
+      "denoise": "INPUT_DENOISE",
+      "model": ["11", 0],
+      "positive": ["13", 0],
+      "negative": ["13", 1],
+      "latent_image": ["6", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "KSampler SDXL-LCM (局部+ControlNet 调度)" }
+  },
+  "10": {
+    "inputs": { "samples": ["9", 0], "vae": ["1", 2] },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAE Decode" }
+  },
+  "14": {
+    "inputs": { "filename_prefix": "sdxl_local", "images": ["10", 0] },
+    "class_type": "SaveImage",
+    "_meta": { "title": "Save" }
+  }
+}

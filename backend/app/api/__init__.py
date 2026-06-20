@@ -13,7 +13,14 @@ import os
 
 router = APIRouter()
 
-STATIC_IMAGES = Path(__file__).resolve().parent.parent.parent / "static" / "images"
+# 与资产链路同目录：老 session 路由的 /api/images 先注册会抢前，必须读同一 AIFD_IMAGES_DIR，
+# 否则资产渲染存在新目录、老路由却去 static/images 找 → 404（实测踩坑）。
+STATIC_IMAGES = Path(
+    os.environ.get(
+        "AIFD_IMAGES_DIR",
+        str(Path(__file__).resolve().parent.parent.parent / "static" / "images"),
+    )
+)
 STATIC_IMAGES.mkdir(parents=True, exist_ok=True)
 
 from app.services.state_machine import Step, DesignStateMachine
