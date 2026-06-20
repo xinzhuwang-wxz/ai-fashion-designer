@@ -295,6 +295,22 @@ async def material(project_id: str, req: MaterialRequest):
     return {"material": {"id": asset.id, "url": f"/api/images/{asset.file_path}"}}
 
 
+@router.post("/projects/{project_id}/lineart-image")
+async def lineart_image(project_id: str, file: UploadFile = File(...)):
+    """草图优先入口（#8）：直接上传/手绘的线稿图 → Lineart 资产（无需先传照片）。"""
+    store = _require_store()
+    if store.get_project(project_id) is None:
+        return JSONResponse({"error": "project not found"}, status_code=404)
+    raw = await file.read()
+    if not is_valid_image(raw):
+        return JSONResponse({"error": "不是有效线稿图片"}, status_code=422)
+    fname = _save_bytes("lineart", raw)
+    asset = store.add_asset(
+        project_id, AssetKind.LINEART, parent_id=None, file_path=fname
+    )
+    return {"lineart": {"id": asset.id, "url": f"/api/images/{asset.file_path}"}}
+
+
 @router.get("/images/{filename}")
 async def serve_image(filename: str):
     path = Path(IMAGES_DIR) / filename
