@@ -39,4 +39,10 @@ class ReadinessGate:
                 return Decision(True)
             return Decision(False, "需要先提取线稿")
 
+        if operation == "edit":
+            for k in (AssetKind.EDIT, AssetKind.MATERIAL, AssetKind.VARIATION):
+                if self.store.latest(project_id, k):
+                    return Decision(True)
+            return Decision(False, "需要先有成衣渲染")
+
         return Decision(False, f"未知操作: {operation}")
