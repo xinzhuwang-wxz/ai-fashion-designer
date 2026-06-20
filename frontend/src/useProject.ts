@@ -13,6 +13,7 @@ export type Asset = { id: string; url: string; kind: string }
 export function useProject() {
   const [projectId, setProjectId] = useState<string | null>(null)
   const [latest, setLatest] = useState<Asset | null>(null)
+  const [variations, setVariations] = useState<Asset[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -57,6 +58,7 @@ export function useProject() {
         const d = await r.json()
         const raw = d.cutout.url as string
         const url = raw.startsWith('http') ? raw : `${API_BASE}${raw}`
+        setVariations([])
         setLatest({ id: d.cutout.id, url, kind: 'cutout' })
       } catch (e: any) {
         setError(`上传失败: ${e.message}`)
@@ -67,5 +69,44 @@ export function useProject() {
     [ensureProject],
   )
 
-  return { projectId, latest, busy, error, upload, apiBase: API_BASE }
+  const generateVariations = useCallback(
+    async (num = 3) => {
+      if (!projectId) return
+      setBusy(true)
+      setError('')
+      try {
+        const r = await fetch(`${API_BASE}/api/projects/${projectId}/variations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ num_variants: num }),
+        })
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const d = await r.json()
+        const vs: Asset[] = (d.variations || []).map((v: any) => ({
+          id: v.id,
+          url: (v.url as string).startsWith('http') ? v.url : `${API_BASE}${v.url}`,
+          kind: 'variation',
+        }))
+        setVariations(vs)
+        if (vs[0]) setLatest(vs[0])
+      } catch (e: any) {
+        setError(`变体生成失败: ${e.message}`)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [projectId],
+  )
+
+  return {
+    projectId,
+    latest,
+    variations,
+    busy,
+    error,
+    upload,
+    generateVariations,
+    setLatest,
+    apiBase: API_BASE,
+  }
 }

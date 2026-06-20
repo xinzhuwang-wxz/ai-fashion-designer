@@ -7,7 +7,8 @@ import { useProject } from './useProject'
 //   右 = 成衣渲染只读画布（显示后端最新资产，前端不自造流程状态）
 // 草图优先入口、seed/材质栏为占位，分别在 #8 / #6 接入。
 export default function App() {
-  const { projectId, latest, busy, error, upload } = useProject()
+  const { projectId, latest, variations, busy, error, upload, generateVariations, setLatest } =
+    useProject()
 
   return (
     <div className="workbench">
@@ -30,6 +31,13 @@ export default function App() {
             }}
           />
         </label>
+        <button
+          className="wb-btn wb-btn-ghost"
+          disabled={!latest || busy}
+          onClick={() => generateVariations(3)}
+        >
+          生成变体
+        </button>
         <span className="wb-status">
           {projectId ? `项目 ${projectId.slice(0, 12)}` : '未建项目'}
         </span>
@@ -77,6 +85,19 @@ export default function App() {
               </label>
             )}
           </div>
+          {variations.length > 0 && (
+            <div className="wb-variations">
+              {variations.map((v) => (
+                <img
+                  key={v.id}
+                  src={v.url}
+                  className={`wb-thumb ${latest?.id === v.id ? 'sel' : ''}`}
+                  onClick={() => setLatest(v)}
+                  alt="变体"
+                />
+              ))}
+            </div>
+          )}
         </section>
       </div>
 
