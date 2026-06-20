@@ -181,6 +181,30 @@ export function useProject() {
     [projectId],
   )
 
+  // 局部编辑：左侧笔触(归一化坐标)→ /edit → 右画布出 EditVersion（只改 mask 区域）
+  const applyEdit = useCallback(
+    async (strokes: { x: number; y: number }[], prompt: string) => {
+      if (!projectId || strokes.length === 0) return
+      setBusy(true)
+      setError('')
+      try {
+        const r = await fetch(`${API_BASE}/api/projects/${projectId}/edit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ strokes, prompt, brush_frac: 0.06, strength: 0.6 }),
+        })
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const d = await r.json()
+        setLatest({ id: d.edit.id, url: absUrl(d.edit.url), kind: 'edit' })
+      } catch (e: any) {
+        setError(`局部重绘失败: ${e.message}`)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [projectId],
+  )
+
   // 草图优先：把左画布导出的草图作为线稿 → 自动渲染成衣（无需上传照片）
   const sketchToGarment = useCallback(
     async (blob: Blob) => {
@@ -232,6 +256,7 @@ export function useProject() {
     extractLineart,
     applyMaterial,
     sketchToGarment,
+    applyEdit,
     setLatest,
     apiBase: API_BASE,
   }
