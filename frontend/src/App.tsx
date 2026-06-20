@@ -100,12 +100,14 @@ export default function App() {
     extractLineart,
     applyMaterial,
     sketchToGarment,
+    applyEdit,
   } = useProject()
 
   const [fabric, setFabric] = useState('silk')
   const [color, setColor] = useState('')
   const [pattern, setPattern] = useState('')
   const [custom, setCustom] = useState('')
+  const [editPrompt, setEditPrompt] = useState('')
   const leftEditorRef = useRef<any>(null)
 
   // 草图优先：把左画布画的内容导成 PNG → 当线稿 → 渲染成衣
@@ -117,6 +119,31 @@ export default function App() {
     const blob = await exportToBlob({ editor, ids, format: 'png', opts: { background: true } })
     if (blob) await sketchToGarment(blob)
   }, [sketchToGarment])
+
+  // 局部编辑(#7)：把左画布上"用户画的笔触"转成【图像归一化坐标】(ADR-0003)→ /edit
+  const genEdit = useCallback(async () => {
+    const editor = leftEditorRef.current
+    if (!editor) return
+    const shapes = editor.getCurrentPageShapes()
+    const imageShape = shapes.find((s: any) => s.meta?.isRef && s.type === 'image')
+    if (!imageShape) return
+    const ib = editor.getShapePageBounds(imageShape.id)
+    if (!ib) return
+    const strokes: { x: number; y: number }[] = []
+    for (const shape of shapes) {
+      if (shape.type !== 'draw' || shape.meta?.isRef) continue
+      for (const seg of shape.props?.segments || []) {
+        for (const pt of seg.points || []) {
+          strokes.push({
+            x: (shape.x + pt.x - ib.x) / ib.w,
+            y: (shape.y + pt.y - ib.y) / ib.h,
+          })
+        }
+      }
+    }
+    if (strokes.length === 0) return
+    await applyEdit(strokes, editPrompt)
+  }, [applyEdit, editPrompt])
 
   return (
     <div className="workbench">
@@ -154,6 +181,16 @@ export default function App() {
         </button>
         <button className="wb-btn wb-btn-ghost" disabled={busy} onClick={genFromSketch}>
           用草图生成
+        </button>
+        <span className="wb-divider" />
+        <input
+          className="wb-mini"
+          placeholder="改什么 如 加蝴蝶结"
+          value={editPrompt}
+          onChange={(e) => setEditPrompt(e.target.value)}
+        />
+        <button className="wb-btn" disabled={busy} onClick={genEdit} title="在左侧线稿上画出要改的区域，再点这里">
+          局部重绘
         </button>
         <span className="wb-status">{projectId ? `项目 ${projectId.slice(0, 12)}` : '未建项目'}</span>
       </header>
