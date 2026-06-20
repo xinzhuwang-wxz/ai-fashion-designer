@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Tldraw } from 'tldraw'
+import { Tldraw, exportToBlob } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { useProject } from './useProject'
 
@@ -7,13 +7,21 @@ const FABRICS = ['silk', 'denim', 'lace', 'leather', 'cotton', 'linen', 'wool', 
 
 // 左画布：线稿/草图可编辑（ADR-0005）。把线稿作为锁定背景载入 Tldraw，可在其上绘制。
 // 笔触→局部编辑（左改右渲）见 #7。
-function SketchCanvas({ image }: { image: string | null }) {
-  const editorRef = useRef<any>(null)
+function SketchCanvas({
+  image,
+  editorRef,
+}: {
+  image: string | null
+  editorRef: React.MutableRefObject<any>
+}) {
   const lastRef = useRef<string | null>(null)
 
-  const onMount = useCallback((editor: any) => {
-    editorRef.current = editor
-  }, [])
+  const onMount = useCallback(
+    (editor: any) => {
+      editorRef.current = editor
+    },
+    [editorRef],
+  )
 
   useEffect(() => {
     if (!image || image === lastRef.current) return
@@ -91,12 +99,24 @@ export default function App() {
     selectVariation,
     extractLineart,
     applyMaterial,
+    sketchToGarment,
   } = useProject()
 
   const [fabric, setFabric] = useState('silk')
   const [color, setColor] = useState('')
   const [pattern, setPattern] = useState('')
   const [custom, setCustom] = useState('')
+  const leftEditorRef = useRef<any>(null)
+
+  // 草图优先：把左画布画的内容导成 PNG → 当线稿 → 渲染成衣
+  const genFromSketch = useCallback(async () => {
+    const editor = leftEditorRef.current
+    if (!editor) return
+    const ids = [...editor.getCurrentPageShapeIds()]
+    if (ids.length === 0) return
+    const blob = await exportToBlob({ editor, ids, format: 'png', opts: { background: true } })
+    if (blob) await sketchToGarment(blob)
+  }, [sketchToGarment])
 
   return (
     <div className="workbench">
@@ -132,13 +152,16 @@ export default function App() {
         >
           提取线稿
         </button>
+        <button className="wb-btn wb-btn-ghost" disabled={busy} onClick={genFromSketch}>
+          用草图生成
+        </button>
         <span className="wb-status">{projectId ? `项目 ${projectId.slice(0, 12)}` : '未建项目'}</span>
       </header>
 
       <div className="wb-canvases">
         <section className="wb-pane">
           <div className="wb-pane-label">线稿 / 草图（可编辑）</div>
-          <SketchCanvas image={leftImage} />
+          <SketchCanvas image={leftImage} editorRef={leftEditorRef} />
         </section>
 
         <section className="wb-pane">

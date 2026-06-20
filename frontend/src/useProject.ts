@@ -181,6 +181,43 @@ export function useProject() {
     [projectId],
   )
 
+  // 草图优先：把左画布导出的草图作为线稿 → 自动渲染成衣（无需上传照片）
+  const sketchToGarment = useCallback(
+    async (blob: Blob) => {
+      setBusy(true)
+      setError('')
+      try {
+        const pid = await ensureProject()
+        const fd = new FormData()
+        fd.append('file', new File([blob], 'sketch.png', { type: 'image/png' }))
+        const la = await fetch(`${API_BASE}/api/projects/${pid}/lineart-image`, {
+          method: 'POST',
+          body: fd,
+        })
+        if (!la.ok) throw new Error(`线稿 HTTP ${la.status}`)
+        await la.json()
+        setVariations([])
+        setSelectedVariationId(null)
+        const mat = await fetch(`${API_BASE}/api/projects/${pid}/material`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fabric: 'silk' }),
+        })
+        if (mat.ok) {
+          const md = await mat.json()
+          setLatest({ id: md.material.id, url: absUrl(md.material.url), kind: 'material' })
+        } else {
+          setError('成衣渲染需启动 ComfyUI（草图已作为线稿）')
+        }
+      } catch (e: any) {
+        setError(`生成失败: ${e.message}`)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [ensureProject],
+  )
+
   return {
     projectId,
     latest,
@@ -194,6 +231,7 @@ export function useProject() {
     selectVariation,
     extractLineart,
     applyMaterial,
+    sketchToGarment,
     setLatest,
     apiBase: API_BASE,
   }
