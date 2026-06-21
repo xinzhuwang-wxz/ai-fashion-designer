@@ -1,88 +1,34 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Tldraw, exportToBlob } from 'tldraw'
-import 'tldraw/tldraw.css'
+import { PaintCanvas, PAINT_W, PAINT_H, DirtyRegion } from './PaintCanvas'
 import { useProject } from './useProject'
 
 const FABRICS = ['silk', 'denim', 'lace', 'leather', 'cotton', 'linen', 'wool', 'velvet']
+const LIVE_SEED = 42 // 固定 seed：连续渲染保持同一件单品
 
-// 左画布：线稿/草图可编辑（ADR-0005）。把线稿作为锁定背景载入 Tldraw，可在其上绘制。
-// 笔触→局部编辑（左改右渲）见 #7。
-function SketchCanvas({
-  image,
-  editorRef,
-}: {
-  image: string | null
-  editorRef: React.MutableRefObject<any>
-}) {
-  const lastRef = useRef<string | null>(null)
+function blobOf(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((res) => canvas.toBlob((b) => res(b), 'image/png'))
+}
 
-  const onMount = useCallback(
-    (editor: any) => {
-      editorRef.current = editor
-    },
-    [editorRef],
-  )
-
-  useEffect(() => {
-    if (!image || image === lastRef.current) return
-    const editor = editorRef.current
-    if (!editor) return
-    lastRef.current = image
-
-    const old = editor.getCurrentPageShapes().filter((s: any) => s.meta?.isRef)
-    if (old.length) editor.deleteShapes(old.map((s: any) => s.id))
-
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = async () => {
-      // Tldraw 要求 fileSize 为非零正数；取真实 blob 大小
-      let fileSize = 1
-      try {
-        fileSize = (await (await fetch(image)).blob()).size || 1
-      } catch {
-        /* 拿不到就用占位 1 */
-      }
-      const stamp = Date.now()
-      const assetId = `asset:la_${stamp}`
-      editor.createAssets([
-        {
-          id: assetId,
-          type: 'image',
-          typeName: 'asset',
-          meta: {},
-          props: {
-            name: 'lineart',
-            src: image,
-            w: img.naturalWidth,
-            h: img.naturalHeight,
-            mimeType: 'image/png',
-            isAnimated: false,
-            fileSize,
-          },
-        },
-      ])
-      const vw = editor.getViewportScreenBounds().width
-      const vh = editor.getViewportScreenBounds().height
-      const scale = Math.min(vw / img.naturalWidth, vh / img.naturalHeight, 1) * 0.85
-      editor.createShape({
-        id: `shape:la_${stamp}`,
-        type: 'image',
-        x: 0,
-        y: 0,
-        isLocked: true,
-        meta: { isRef: true },
-        props: { assetId, w: img.naturalWidth * scale, h: img.naturalHeight * scale },
-      })
-      editor.zoomToFit({ animation: { duration: 200 } })
+// 改动区 bbox（画布像素坐标）→ mask 图（白=改动区），供局部渲染
+function makeMaskBlob(region: DirtyRegion): Promise<Blob | null> {
+  const cv = document.createElement('canvas')
+  cv.width = PAINT_W
+  cv.height = PAINT_H
+  const ctx = cv.getContext('2d')!
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, PAINT_W, PAINT_H)
+  if (region) {
+    const pad = 24
+    const x = Math.max(0, region.minX - pad)
+    const y = Math.max(0, region.minY - pad)
+    const w = Math.min(PAINT_W, region.maxX + pad) - x
+    const h = Math.min(PAINT_H, region.maxY + pad) - y
+    if (w > 0 && h > 0) {
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(x, y, w, h)
     }
-    img.src = image
-  }, [image])
-
-  return (
-    <div className="wb-canvas-host">
-      <Tldraw onMount={onMount} persistenceKey="aifd-left" />
-    </div>
-  )
+  }
+  return blobOf(cv)
 }
 
 export default function App() {
@@ -97,10 +43,10 @@ export default function App() {
     upload,
     generateVariations,
     selectVariation,
-    extractLineart,
-    applyMaterial,
     sketchToGarment,
-    applyEdit,
+    renderLive,
+    renderLocal,
+    finalizeDesign,
     downloadRender,
     exportParams,
   } = useProject()
@@ -109,43 +55,74 @@ export default function App() {
   const [color, setColor] = useState('')
   const [pattern, setPattern] = useState('')
   const [custom, setCustom] = useState('')
-  const [editPrompt, setEditPrompt] = useState('')
-  const leftEditorRef = useRef<any>(null)
+  const [liveMode, setLiveMode] = useState(false)
 
-  // 草图优先：把左画布画的内容导成 PNG → 当线稿 → 渲染成衣
-  const genFromSketch = useCallback(async () => {
-    const editor = leftEditorRef.current
-    if (!editor) return
-    const ids = [...editor.getCurrentPageShapeIds()]
-    if (ids.length === 0) return
-    const blob = await exportToBlob({ editor, ids, format: 'png', opts: { background: true } })
-    if (blob) await sketchToGarment(blob)
-  }, [sketchToGarment])
+  const canvasElRef = useRef<HTMLCanvasElement | null>(null)
+  const regionRef = useRef<DirtyRegion>(null)
+  const liveModeRef = useRef(false)
+  const latestRef = useRef(latest)
+  const paramsRef = useRef({ fabric, color, pattern, custom })
+  const inFlightRef = useRef(false)
+  const dirtyRef = useRef(false)
+  useEffect(() => {
+    liveModeRef.current = liveMode
+  }, [liveMode])
+  useEffect(() => {
+    latestRef.current = latest
+  }, [latest])
+  useEffect(() => {
+    paramsRef.current = { fabric, color, pattern, custom }
+  }, [fabric, color, pattern, custom])
 
-  // 局部编辑(#7)：把左画布上"用户画的笔触"转成【图像归一化坐标】(ADR-0003)→ /edit
-  const genEdit = useCallback(async () => {
-    const editor = leftEditorRef.current
-    if (!editor) return
-    const shapes = editor.getCurrentPageShapes()
-    const imageShape = shapes.find((s: any) => s.meta?.isRef && s.type === 'image')
-    if (!imageShape) return
-    const ib = editor.getShapePageBounds(imageShape.id)
-    if (!ib) return
-    const strokes: { x: number; y: number }[] = []
-    for (const shape of shapes) {
-      if (shape.type !== 'draw' || shape.meta?.isRef) continue
-      for (const seg of shape.props?.segments || []) {
-        for (const pt of seg.points || []) {
-          strokes.push({
-            x: (shape.x + pt.x - ib.x) / ib.w,
-            y: (shape.y + pt.y - ib.y) / ib.h,
-          })
+  const pump = useCallback(async () => {
+    const cv = canvasElRef.current
+    if (!cv) return
+    if (inFlightRef.current) {
+      dirtyRef.current = true
+      return
+    }
+    inFlightRef.current = true
+    dirtyRef.current = false
+    const region = regionRef.current
+    regionRef.current = null
+    const sketch = await blobOf(cv)
+    if (sketch) {
+      const cur = latestRef.current
+      if (!cur || !region) {
+        await renderLive(sketch, paramsRef.current, LIVE_SEED)
+      } else {
+        const mask = await makeMaskBlob(region)
+        let baseImg: Blob | null = null
+        try {
+          baseImg = await (await fetch(cur.url)).blob()
+        } catch {
+          /* 取不到底图 → 退回整件 */
         }
+        if (mask && baseImg) await renderLocal(sketch, mask, baseImg, paramsRef.current, LIVE_SEED)
+        else await renderLive(sketch, paramsRef.current, LIVE_SEED)
       }
     }
-    if (strokes.length === 0) return
-    await applyEdit(strokes, editPrompt)
-  }, [applyEdit, editPrompt])
+    inFlightRef.current = false
+    if (dirtyRef.current) pump()
+  }, [renderLive, renderLocal])
+
+  const onCanvasChange = useCallback(() => {
+    if (liveModeRef.current) pump()
+  }, [pump])
+
+  useEffect(() => {
+    if (liveMode) {
+      regionRef.current = null
+      pump()
+    }
+  }, [liveMode, pump])
+
+  const renderCurrent = useCallback(async () => {
+    const cv = canvasElRef.current
+    if (!cv) return
+    const blob = await blobOf(cv)
+    if (blob) await sketchToGarment(blob, { fabric, color, pattern, custom })
+  }, [sketchToGarment, fabric, color, pattern, custom])
 
   return (
     <div className="workbench">
@@ -169,38 +146,33 @@ export default function App() {
         </label>
         <button
           className="wb-btn wb-btn-ghost"
-          disabled={(!leftImage && !latest) || busy}
+          disabled={!selectedVariationId && !leftImage && !latest}
           onClick={() => generateVariations(3)}
         >
           换个方案
         </button>
         <button
-          className="wb-btn wb-btn-ghost"
-          disabled={!selectedVariationId || busy}
-          onClick={() => extractLineart()}
+          className={`wb-btn ${liveMode ? '' : 'wb-btn-ghost'}`}
+          onClick={() => setLiveMode((v) => !v)}
+          title="开启后：左侧用笔/橡皮改线稿（橡皮过哪擦哪），右侧只重渲你改的那一块"
         >
-          提取线稿
-        </button>
-        <button className="wb-btn wb-btn-ghost" disabled={busy} onClick={genFromSketch}>
-          用草图生成
-        </button>
-        <span className="wb-divider" />
-        <input
-          className="wb-mini"
-          placeholder="改什么 如 加蝴蝶结"
-          value={editPrompt}
-          onChange={(e) => setEditPrompt(e.target.value)}
-        />
-        <button className="wb-btn" disabled={busy} onClick={genEdit} title="在左侧线稿上画出要改的区域，再点这里">
-          局部重绘
+          {liveMode ? '● 实时局部渲染中' : '实时'}
         </button>
         <span className="wb-status">{projectId ? `项目 ${projectId.slice(0, 12)}` : '未建项目'}</span>
       </header>
 
       <div className="wb-canvases">
         <section className="wb-pane">
-          <div className="wb-pane-label">线稿 / 草图（可编辑）</div>
-          <SketchCanvas image={leftImage} editorRef={leftEditorRef} />
+          <div className="wb-pane-label">
+            线稿草图（笔/橡皮，过哪擦哪）
+            {liveMode && <span className="wb-state">● 改哪块右边渲哪块</span>}
+          </div>
+          <PaintCanvas
+            image={leftImage}
+            onChange={onCanvasChange}
+            canvasElRef={canvasElRef}
+            regionRef={regionRef}
+          />
         </section>
 
         <section className="wb-pane">
@@ -209,6 +181,9 @@ export default function App() {
             <span className="wb-label-actions">
               {latest && (
                 <>
+                  <button className="wb-link" onClick={finalizeDesign} title="当前成衣 2x 高清放大为成品">
+                    完成定稿
+                  </button>
                   <button className="wb-link" onClick={downloadRender}>
                     下载
                   </button>
@@ -233,9 +208,9 @@ export default function App() {
               <img src={latest.url} alt="成衣渲染" />
             ) : leftImage ? (
               <div className="wb-placeholder">
-                成衣渲染（需启动 ComfyUI）
+                左侧已有线稿
                 <br />
-                左侧线稿已就绪；改面料后点「试穿」重渲
+                点「实时」边改边渲，或下方「渲染成衣」
               </div>
             ) : (
               <label className="wb-dropzone">
@@ -251,7 +226,7 @@ export default function App() {
                   }}
                 />
                 点此 / 拖入服装图上传
-                <span className="wb-dz-sub">上传后自动：左出线稿、右出成衣</span>
+                <span className="wb-dz-sub">上传后自动：左出可编辑线稿、右出成衣</span>
               </label>
             )}
           </div>
@@ -285,13 +260,9 @@ export default function App() {
         </div>
         <input className="wb-mini" placeholder="颜色 如 酒红色" value={color} onChange={(e) => setColor(e.target.value)} />
         <input className="wb-mini" placeholder="图案 如 纯色/碎花" value={pattern} onChange={(e) => setPattern(e.target.value)} />
-        <input className="wb-mini" placeholder="自定义描述" value={custom} onChange={(e) => setCustom(e.target.value)} />
-        <button
-          className="wb-btn"
-          disabled={!leftImage || busy}
-          onClick={() => applyMaterial({ fabric, color, pattern, custom })}
-        >
-          试穿
+        <input className="wb-mini" placeholder="品类/描述 如 leather handbag" value={custom} onChange={(e) => setCustom(e.target.value)} />
+        <button className="wb-btn" disabled={busy} onClick={renderCurrent}>
+          渲染成衣
         </button>
         {error && <span className="wb-error">{error}</span>}
       </footer>

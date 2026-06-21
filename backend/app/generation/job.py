@@ -47,6 +47,7 @@ def run_generation(
     model: Optional[str] = None,
     job_id: Optional[str] = None,
     registry: Optional[JobRegistry] = None,
+    post_process: Optional[Callable[[bytes], bytes]] = None,
 ) -> DesignAsset:
     """生成 → 校验非空可解码 → 落盘 → add_asset。空/坏抛 GenerationError；
     job 已取消抛 GenerationCancelled（均不创建资产）。
@@ -66,6 +67,11 @@ def run_generation(
     data = backend.generate(workflow_name, inputs)
     if not is_valid_image(data):
         raise GenerationError(f"generation '{workflow_name}' 返回空/无效结果")
+    # 主体锁定等后处理（#24）：在已校验的渲染字节上做 mask 合成，再落盘。
+    if post_process is not None:
+        data = post_process(data)
+        if not is_valid_image(data):
+            raise GenerationError(f"generation '{workflow_name}' 后处理返回无效结果")
     if _cancelled():
         raise GenerationCancelled(job_id)
     file_path = save(kind.value, data)

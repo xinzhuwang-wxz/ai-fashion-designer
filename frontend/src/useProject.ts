@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 // 运行时配置：默认 localhost，可由 Vite 环境变量覆盖（完整环境化见 #5）
 const API_BASE: string =
@@ -14,6 +14,7 @@ export function useProject() {
   const [projectId, setProjectId] = useState<string | null>(null)
   const [latest, setLatest] = useState<Asset | null>(null) // 右画布：渲染成衣
   const [leftImage, setLeftImage] = useState<string | null>(null) // 左画布：可编辑线稿
+  const [strokes, setStrokes] = useState<{ x: number; y: number }[][] | null>(null) // 矢量化折线→原生笔画
   const [variations, setVariations] = useState<Asset[]>([])
   const [selectedVariationId, setSelectedVariationId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -32,8 +33,14 @@ export function useProject() {
         .then((d) => {
           if (!d || cancelled) return
           const a = d.assets || {}
-          if (a.lineart?.url) setLeftImage(absUrl(a.lineart.url))
-          const right = a.edit || a.material || a.variation || a.cutout
+          if (a.lineart?.url) {
+            setLeftImage(absUrl(a.lineart.url))
+            fetch(`${API_BASE}/api/projects/${existing}/lineart-vector`, { method: 'POST' })
+              .then((r) => (r.ok ? r.json() : null))
+              .then((d) => d && setStrokes(d.strokes))
+              .catch(() => {})
+          }
+          const right = a.final || a.edit || a.material || a.variation || a.cutout
           if (right?.url) setLatest({ id: right.id, url: absUrl(right.url), kind: 'restored' })
         })
         .catch(() => {})
@@ -86,6 +93,13 @@ export function useProject() {
         if (!la.ok) throw new Error(`线稿 HTTP ${la.status}`)
         const lad = await la.json()
         setLeftImage(absUrl(lad.lineart.url))
+        // 2.5) 矢量化线稿 → 原生笔画（可被画板原生笔/橡皮统一编辑）
+        try {
+          const vr = await fetch(`${API_BASE}/api/projects/${pid}/lineart-vector`, { method: 'POST' })
+          if (vr.ok) setStrokes((await vr.json()).strokes)
+        } catch {
+          /* 矢量化失败不阻塞主流程 */
+        }
         // 3) 自动渲染成衣（默认面料）→ 右画布
         const mat = await fetch(`${API_BASE}/api/projects/${pid}/material`, {
           method: 'POST',
@@ -223,9 +237,116 @@ export function useProject() {
     [projectId],
   )
 
+  // 实时局部重绘（#22）：笔触→/edit-live（LCM 4 步快路径）→ 右画布刷新【临时帧，不入谱系】。
+  // 帧合并：新请求 abort 掉仍在飞的旧请求，只显示最新一帧；连续涂抹"跟得上"靠 App 层 pump 串行化。
+  const liveAbortRef = useRef<AbortController | null>(null)
+  const editLive = useCallback(
+    async (strokes: { x: number; y: number }[], prompt: string): Promise<boolean> => {
+      if (!projectId || strokes.length === 0) return false
+      liveAbortRef.current?.abort()
+      const ac = new AbortController()
+      liveAbortRef.current = ac
+      try {
+        const r = await fetch(`${API_BASE}/api/projects/${projectId}/edit-live`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ strokes, prompt, brush_frac: 0.06, denoise: 0.9 }),
+          signal: ac.signal,
+        })
+        if (!r.ok) return false
+        const d = await r.json()
+        setLatest({ id: 'live', url: absUrl(d.frame.url), kind: 'live' })
+        return true
+      } catch {
+        return false // abort / 网络错误：丢弃该帧，不打断涂抹
+      }
+    },
+    [projectId],
+  )
+
+  // 实时核心（#22 真机制）：左线稿画板整图 → /render-live（LCM+ControlNet 整件重渲，固定 seed）
+  // → 右成衣帧。用户只改左边、右边跟着变；帧合并由 App 层 pump 串行化 + abort 丢弃过期帧。
+  const renderLive = useCallback(
+    async (
+      blob: Blob,
+      params: { fabric: string; color?: string; pattern?: string; custom?: string },
+      seed: number,
+    ): Promise<boolean> => {
+      if (!projectId) return false
+      liveAbortRef.current?.abort()
+      const ac = new AbortController()
+      liveAbortRef.current = ac
+      const fd = new FormData()
+      fd.append('file', new File([blob], 'sketch.png', { type: 'image/png' }))
+      fd.append('fabric', params.fabric)
+      fd.append('color', params.color || '')
+      fd.append('pattern', params.pattern || '')
+      fd.append('custom', params.custom || '')
+      fd.append('seed', String(seed))
+      try {
+        const r = await fetch(`${API_BASE}/api/projects/${projectId}/render-live`, {
+          method: 'POST',
+          body: fd,
+          signal: ac.signal,
+        })
+        if (!r.ok) return false
+        const d = await r.json()
+        setLatest({ id: 'live', url: absUrl(d.frame.url), kind: 'live' })
+        return true
+      } catch {
+        return false
+      }
+    },
+    [projectId],
+  )
+
+  // 实时【局部】渲染（核心壁垒）：左侧改动区 → 只重绘那块 → 右侧局部更新、其余不动。
+  const renderLocal = useCallback(
+    async (
+      sketch: Blob,
+      mask: Blob,
+      baseImg: Blob,
+      params: { fabric: string; color?: string; pattern?: string; custom?: string },
+      seed: number,
+      feature = '',
+    ): Promise<boolean> => {
+      if (!projectId) return false
+      liveAbortRef.current?.abort()
+      const ac = new AbortController()
+      liveAbortRef.current = ac
+      const fd = new FormData()
+      fd.append('sketch', new File([sketch], 's.png', { type: 'image/png' }))
+      fd.append('mask', new File([mask], 'm.png', { type: 'image/png' }))
+      fd.append('base', new File([baseImg], 'b.png', { type: 'image/png' }))
+      fd.append('fabric', params.fabric)
+      fd.append('color', params.color || '')
+      fd.append('pattern', params.pattern || '')
+      fd.append('custom', params.custom || '')
+      fd.append('feature', feature)
+      fd.append('seed', String(seed))
+      try {
+        const r = await fetch(`${API_BASE}/api/projects/${projectId}/render-local`, {
+          method: 'POST',
+          body: fd,
+          signal: ac.signal,
+        })
+        if (!r.ok) return false
+        const d = await r.json()
+        setLatest({ id: 'live', url: absUrl(d.frame.url), kind: 'live' })
+        return true
+      } catch {
+        return false
+      }
+    },
+    [projectId],
+  )
+
   // 草图优先：把左画布导出的草图作为线稿 → 自动渲染成衣（无需上传照片）
   const sketchToGarment = useCallback(
-    async (blob: Blob) => {
+    async (
+      blob: Blob,
+      params: { fabric: string; color?: string; pattern?: string; custom?: string } = { fabric: 'silk' },
+    ) => {
       setBusy(true)
       setError('')
       try {
@@ -243,7 +364,7 @@ export function useProject() {
         const mat = await fetch(`${API_BASE}/api/projects/${pid}/material`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fabric: 'silk' }),
+          body: JSON.stringify(params),
         })
         if (mat.ok) {
           const md = await mat.json()
@@ -259,6 +380,25 @@ export function useProject() {
     },
     [ensureProject],
   )
+
+  // 场景6 完成设计：当前成衣 2x 高清放大 → Final 资产（右画布切到高清成品）
+  const finalizeDesign = useCallback(async () => {
+    if (!projectId) return
+    setBusy(true)
+    setError('')
+    try {
+      const r = await fetch(`${API_BASE}/api/projects/${projectId}/finalize`, {
+        method: 'POST',
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const d = await r.json()
+      setLatest({ id: d.final.id, url: absUrl(d.final.url), kind: 'final' })
+    } catch (e: any) {
+      setError(`定稿失败: ${e.message}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [projectId])
 
   // 下载当前右画布成衣图
   const downloadRender = useCallback(() => {
@@ -299,6 +439,7 @@ export function useProject() {
     projectId,
     latest,
     leftImage,
+    strokes,
     variations,
     selectedVariationId,
     busy,
@@ -310,6 +451,10 @@ export function useProject() {
     applyMaterial,
     sketchToGarment,
     applyEdit,
+    editLive,
+    renderLive,
+    renderLocal,
+    finalizeDesign,
     downloadRender,
     exportParams,
     setLatest,

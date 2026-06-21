@@ -1,0 +1,82 @@
+{
+  "1": {
+    "inputs": { "ckpt_name": "v1-5-pruned-emaonly.safetensors" },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "Load Checkpoint" }
+  },
+  "11": {
+    "inputs": {
+      "lora_name": "lcm-lora-sdv1-5.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": ["1", 0],
+      "clip": ["1", 1]
+    },
+    "class_type": "LoraLoader",
+    "_meta": { "title": "Load LCM LoRA (蒸馏到 4 步)" }
+  },
+  "2": {
+    "inputs": { "image": "INPUT_IMAGE", "upload": "image" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Load Lineart (左画板导出)" }
+  },
+  "3": {
+    "inputs": { "text": "INPUT_PROMPT", "clip": ["11", 1] },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Positive" }
+  },
+  "4": {
+    "inputs": {
+      "text": "ugly, blurry, low quality, distorted, bad anatomy, watermark, text",
+      "clip": ["11", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Negative" }
+  },
+  "5": {
+    "inputs": { "control_net_name": "INPUT_CONTROLNET" },
+    "class_type": "ControlNetLoader",
+    "_meta": { "title": "Load ControlNet" }
+  },
+  "6": {
+    "inputs": {
+      "strength": 0.8,
+      "conditioning": ["3", 0],
+      "control_net": ["5", 0],
+      "image": ["2", 0]
+    },
+    "class_type": "ControlNetApply",
+    "_meta": { "title": "Apply ControlNet (跟线稿)" }
+  },
+  "7": {
+    "inputs": { "width": 512, "height": 768, "batch_size": 1 },
+    "class_type": "EmptyLatentImage",
+    "_meta": { "title": "Empty Latent" }
+  },
+  "8": {
+    "inputs": {
+      "seed": "INPUT_SEED",
+      "steps": 6,
+      "cfg": 1.5,
+      "sampler_name": "lcm",
+      "scheduler": "sgm_uniform",
+      "denoise": 1.0,
+      "model": ["11", 0],
+      "positive": ["6", 0],
+      "negative": ["4", 0],
+      "latent_image": ["7", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "KSampler LCM (4 步整件重渲)" }
+  },
+  "9": {
+    "inputs": { "samples": ["8", 0], "vae": ["1", 2] },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAE Decode" }
+  },
+  "10": {
+    "inputs": { "filename_prefix": "lcm_render", "images": ["9", 0] },
+    "class_type": "SaveImage",
+    "_meta": { "title": "Save" }
+  }
+}

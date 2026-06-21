@@ -43,7 +43,16 @@ def _seed_cutout(store, images_dir, pid):
     return store.add_asset(pid, AssetKind.CUTOUT, file_path="cutout_x.png")
 
 
-def test_variations_creates_variation_assets_under_cutout(tmp_path):
+def _seed_lineart(store, images_dir, pid, parent):
+    with open(os.path.join(images_dir, "lineart_x.png"), "wb") as f:
+        f.write(_png())
+    return store.add_asset(
+        pid, AssetKind.LINEART, parent_id=parent.id, file_path="lineart_x.png"
+    )
+
+
+def test_variations_render_under_lineart_via_controlnet(tmp_path):
+    # #23：变体改走 线稿 + ControlNet（与 material 同路线，出 material 级画质），非旧 img2img-on-cutout
     store = InMemoryAssetStore()
     images = str(tmp_path / "img")
     backend = FakeBackend(_png((90, 30, 30)))
@@ -51,15 +60,17 @@ def test_variations_creates_variation_assets_under_cutout(tmp_path):
 
     pid = client.post("/api/projects").json()["project_id"]
     cutout = _seed_cutout(store, images, pid)
+    lineart = _seed_lineart(store, images, pid, cutout)
 
     r = client.post(f"/api/projects/{pid}/variations", json={"num_variants": 2})
     assert r.status_code == 200
     assert len(r.json()["variations"]) == 2
 
-    variations = store.children(cutout.id, kind=AssetKind.VARIATION)
+    variations = store.children(lineart.id, kind=AssetKind.VARIATION)
     assert len(variations) == 2
-    assert all(v.parent_id == cutout.id for v in variations)
+    assert all(v.parent_id == lineart.id for v in variations)
     assert all(v.seed is not None for v in variations)
+    assert backend.calls == ["fabric_fill_controlnet.json", "fabric_fill_controlnet.json"]
 
 
 def test_variations_empty_result_creates_no_asset(tmp_path):
@@ -69,10 +80,11 @@ def test_variations_empty_result_creates_no_asset(tmp_path):
 
     pid = client.post("/api/projects").json()["project_id"]
     cutout = _seed_cutout(store, images, pid)
+    lineart = _seed_lineart(store, images, pid, cutout)
 
     r = client.post(f"/api/projects/{pid}/variations", json={"num_variants": 1})
     assert r.status_code == 502
-    assert store.children(cutout.id, kind=AssetKind.VARIATION) == []
+    assert store.children(lineart.id, kind=AssetKind.VARIATION) == []
 
 
 def test_variations_without_cutout_returns_400(tmp_path):
